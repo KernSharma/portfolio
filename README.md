@@ -9,7 +9,7 @@ This repository contains my **portfolio website(wip)** and projects that showcas
 
 ## About Me
 - Current school: University of Massachusetts Amherst
-- Major: Undeclared (interested in Computer Science / Engineering)
+- Major: Computer Science 
 - Interests: AI, programming, web development, ethics in tech
 
 ## Repository Structure
