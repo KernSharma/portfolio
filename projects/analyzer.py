@@ -5,6 +5,7 @@ from nba_api.stats.endpoints import playergamelog
 from nba_api.live.nba.endpoints import scoreboard
 from nba_api.stats.endpoints import leagueseasonmatchups
 import pandas as pd
+import time
 
 
 
@@ -53,6 +54,7 @@ class Roster:
              projected_pts += int(averages['fantasy_pts'])
         print("\n\nYour total projected fantasy points per game is: " + str(projected_pts))
 
+        return averages
 
 
 
@@ -120,63 +122,191 @@ class Roster:
               except ValueError:
                    print("Please enter a valid number or skip")
          return None
-    '''
-    def getPositions(self, roster):
-         positions = []
-         print("Now input the players position(PG,SF,SG,C,G,F,UTIL,BEN):")
-         print("press enter on an empty line to finish")
-         for i in roster:
-             while True:
-                  
-               pos = input(i + ": ").upper().strip()
-               if not pos:
-                    break
-               if pos not in ["PG", "SG", "PF", "SF", "C", "G", "F", "UTIL","BEN"]:
-                  print("invalid position.")
-               else:
-                    positions.append(pos)
-                    break
-         return positions
-    
-    def getMatchup(self, roster, positions):
-         for i in range(len(roster)-1):
-              print(positions[i] + ": " + roster[i["full_name"]])
-              '''
-    #maybe unnecessary 
+   
+ 
 
     def getPlayerMatchup(self, roster):
-         print("Enter the team abbreviation(LAL, BOS, ATL) the player is playing against(Press enter on an empty line to quit): ")
-         opposing_teams = {}
-         for player in roster:
-              
-               while True:
-                    team = input(player['full_name'] + ": ").strip().upper()
-                    if not team:
-                         break
-                    if teams.find_team_by_abbreviation(team, teams = teams).strip().upper() == team:
-                         opposing_teams.update(player['full_name'], team)
-                    else:
-                         print("thats not a team brotosynthesis")
-                         break
-               if not opposing_teams:
-                    print("No teams entered. Exiting")
-                    break
-         return opposing_teams
+          print("Enter the team abbreviation(LAL, BOS, ATL) the player is playing against(Press enter on an empty line to quit): ")
+          opposing_teams = {}
+          for player in roster:
+               
+                while True:
+                     team = input(player['full_name'] + ": ").strip().upper()
+                     if not team:
+                          break
+                     valid = False
+                     for t in self.allT:
+                         if t['abbreviation'] == team:
+                             valid = True
+                             break
+                     if valid:
+                          opposing_teams[player['full_name']] = team
+                          break
+                     else:
+                          print("thats not a team bro")
+          return opposing_teams
 
 
-    def getMatchupData(self, player, opposition,seasons):
-         fantasy_pts = 0.0
+    def getMatchupData(self, player, opposition, seasons):
+         all_stats = []
          for season in seasons:
-          log = playergamelog.PlayerGameLog(player_id= player['id'], season=season)
-          data = log.get_data_frames()[0]
-          player_vs_opp = data[data['MATCHUP'].str.contains(opposition,na = False)]
+           time.sleep(0.5)
+           try:
+               log = playergamelog.PlayerGameLog(player_id=player['id'], season=season)
+               data = log.get_data_frames()[0]
+               if len(data) > 0:
+                   #try different ways to find the team
+                   vs_opp = data[data['MATCHUP'].str.contains(opposition, na=False)]
+                   if len(vs_opp) == 0:
+                       vs_opp = data[data['MATCHUP'].str.contains("vs. " + opposition, na=False)]
+                   if len(vs_opp) == 0:
+                       vs_opp = data[data['MATCHUP'].str.contains("@" + opposition, na=False)]
+                   
+                   if len(vs_opp) > 0:
+                       vs_opp = vs_opp.copy()
+                       vs_opp['FANTASY_PTS'] = ((vs_opp['PTS'] * 1.0) + (vs_opp['AST'] * 1.5) + (vs_opp['REB'] * 1.2) + (vs_opp['STL'] * 3) + (vs_opp['BLK'] * 3) - (vs_opp['TOV'] * 1) + (vs_opp['FG3M'] * 0.5))
+                       all_stats.append(vs_opp)
+           except Exception as e:
+               print("Error getting " + season + " data for " + player['full_name'] + ": " + str(e))
+         
+         if all_stats:
+             combined = pd.concat(all_stats, ignore_index=True)
+             return combined['FANTASY_PTS'].mean()
+         else:
+             #fallback to season average if no matchup data found 
+             print("No matchup data for " + player['full_name'] + " vs " + opposition + ", using season average")
+             return self.getSeasonAverage(player, seasons)
 
-          if len(data) > 0:
-               fantasy_pts  = ((player_vs_opp['PTS'] * 1.0) + (player_vs_opp['AST'] * 1.5) + (player_vs_opp['REB'] * 1.2) + (player_vs_opp['STL'] * 3) + (player_vs_opp['BLK'] * 3) - (player_vs_opp['TOV'] * 1) + (player_vs_opp['FG3M'] * 0.5))
+    def getSeasonAverage(self, player, seasons):
+         #i need this js incase the user inputs a player and the player was majorly injured or was on that opposing team in the last 5 seasons
+         all_stats = []
+         for season in seasons:
+           time.sleep(0.3)
+           try:
+               log = playergamelog.PlayerGameLog(player_id=player['id'], season=season)
+               data = log.get_data_frames()[0]
+               if len(data) > 0:
+                   data = data.copy()
+                   data['FANTASY_PTS'] = ((data['PTS'] * 1.0) + (data['AST'] * 1.5) + (data['REB'] * 1.2) + (data['STL'] * 3) + (data['BLK'] * 3) - (data['TOV'] * 1) + (data['FG3M'] * 0.5))
+                   all_stats.append(data)
+           except Exception as e:
+               print("Error getting " + season + " season data for " + player['full_name'] + ": " + str(e))
+         
+         if all_stats:
+             combined = pd.concat(all_stats, ignore_index=True)
+             return combined['FANTASY_PTS'].mean()
+         return 0.0
+
+    def getPlayerPositions(self, roster):
+         print("Please enter player positions here(Eg: SGA: PG,SG): ")
+         player_pos = {}
+         '''so in order to do this i have to go through the roster and ask the user to input the players positions
+         so i guess kinda like: {player: "PGSGC"} -> that player is a PG, SG, and C'''
+         for player in roster:
           
-          return fantasy_pts
-     
+          positions = ["PG", "SG", "SF", "PF", "C"]
+          
+          user_input = input("Enter player positions for " + player['full_name'] + ": ").upper().replace(",", "").replace(" ", "")
 
+          player_positions = []
+          for pos in positions:
+                    if pos in user_input:
+                         player_positions.append(pos)
+
+          player_pos[player['full_name']] = player_positions
+
+         return player_pos
+              
+    def sortPlayers(self, roster, positions):
+         sorted_roster = {}
+         for player in roster:
+              sorted_roster[player['full_name']] = player.get('FANTASY_PTS', 0)
+     
+         sorted_roster = dict(sorted(sorted_roster.items(), key=lambda item: item[1], reverse=True))
+         return sorted_roster
+    
+
+    def buildOptimalLineup(self, players,matchup_data, positions):
+         player_data = []
+         for player in players:
+              player_name = player['full_name']
+              if player_name in matchup_data and player_name in positions:
+                   player_data.append({'name': player_name, 'id': player['id'], 'fantasy_pts': matchup_data[player_name], 'positions' : positions[player_name]})
+          
+         player_data.sort(key=lambda x: x['fantasy_pts'], reverse=True)
+         lineup = {
+             'PG': None, 'SG': None, 'SF': None, 'PF': None, 'C': None,
+             'G': None, 'F': None, 'UTIL1': None, 'UTIL2': None, 'UTIL3': None,
+             'BENCH1': None, 'BENCH2': None, 'BENCH3': None
+         }
+
+         used = set()
+
+         specific_positions = ['PG', 'SG', 'SF', 'PF', 'C']
+         for pos in specific_positions:
+             for player in player_data:
+                 if player['name'] not in used and pos in player['positions']:
+                     lineup[pos] = player
+                     used.add(player['name'])
+                     break
+         for player in player_data:
+             if player['name'] not in used and ('PG' in player['positions'] or 'SG' in player['positions']):
+                 lineup['G'] = player
+                 used.add(player['name'])
+                 break
+          
+         for player in player_data:
+             if player['name'] not in used and ('SF' in player['positions'] or 'PF' in player['positions']):
+                 lineup['F'] = player
+                 used.add(player['name'])
+                 break
+             
+         util_positions = ['UTIL1', 'UTIL2', 'UTIL3']
+         for util_pos in util_positions:
+             for player in player_data:
+                 if player['name'] not in used:
+                     lineup[util_pos] = player
+                     used.add(player['name'])
+                     break
+                 
+         bench_positions = ['BENCH1', 'BENCH2', 'BENCH3']
+         for bench_pos in bench_positions:
+             for player in player_data:
+                 if player['name'] not in used:
+                     lineup[bench_pos] = player
+                     used.add(player['name'])
+                     break
+         
+             return lineup
+
+    def displayLineup(self, lineup):
+         print("\n Optimal Lineup:")
+         starting_positions = ['PG', 'SG', 'SF', 'PF', 'C']
+         for pos in starting_positions:
+             if lineup[pos]:
+                 player = lineup[pos]
+                 print(pos + ": " + player['name'] + " (" + str(round(player['fantasy_pts'], 1)) + " FP)")
+         
+         flex_positions = ['G', 'F', 'UTIL1', 'UTIL2', 'UTIL3']
+         for pos in flex_positions:
+             if lineup[pos]:
+                 player = lineup[pos]
+                 print(pos + ": " + player['name'] + " (" + str(round(player['fantasy_pts'], 1)) + " FP)")
+
+         bench_positions = ['BENCH1', 'BENCH2', 'BENCH3']
+         for pos in bench_positions:
+             if lineup[pos]:
+                 player = lineup[pos]
+                 print(pos + ": " + player['name'] + " (" + str(round(player['fantasy_pts'], 1)) + " FP)")
+         
+         total_fp = 0
+         for pos in starting_positions + flex_positions:
+             if lineup[pos]:
+                 total_fp += lineup[pos]['fantasy_pts']
+         print("\nTotal Active Team Points: " + str(round(total_fp, 1)))
+
+
+         
 
                
                
@@ -189,7 +319,7 @@ class Roster:
 def main():
         seasons = ['2020-21', '2021-22', '2022-23', '2023-24', '2024-25']
         rost = Roster()
-        print("\nEnter your roster (one player per line, press Enter on empty line to finish)(Case Sensitive):")
+        print("\nEnter your roster (one player per line, press Enter on empty line to finish):")
         roster = []
         while True:
             player_name = input("Player name: ").strip()
@@ -201,21 +331,61 @@ def main():
             print("No players entered. Exiting.")
             return
         
-        rost.analyze_roster(roster)
-        opposing_team = rost.getPlayerMatchup(roster)
+        #get player objects first
+        print("\nAnalyzing Roster:")
+        player_objects = []
+        for player_name in roster:
+            matches = rost.find_player(player_name)
+            if len(matches) == 0:
+                print("No players found for " + player_name)
+                continue
+            
+            if len(matches) == 1:
+                player = matches[0]
+                print("Found: " + player['full_name'])
+            else:
+                player = rost.select_player(matches)
+                if not player:
+                    print("Skipping " + player_name)
+                    continue
+            
+            player_objects.append(player)
+        
+        if not player_objects:
+            print("No valid players found. Exiting.")
+            return
+        
+        #get matchup data
+        opposing_teams = rost.getPlayerMatchup(player_objects)
+        
+        #get matchup fantasy points
+        matchup_data = {}
+        for player in player_objects:
+            if player['full_name'] in opposing_teams:
+                opposition = opposing_teams[player['full_name']]
+                matchup_fp = rost.getMatchupData(player, opposition, seasons)
+                matchup_data[player['full_name']] = matchup_fp
+                print(player['full_name'] + " vs " + opposition + ": " + str(round(matchup_fp, 1)) + " FP")
+        
+        #get positions
+        positions = rost.getPlayerPositions(player_objects)
+        
+        sorted_players = sorted(matchup_data.items(), key=lambda x: x[1], reverse=True)
+        print("Players ranked by matchup performance:")
+        for i, (name, fp) in enumerate(sorted_players, 1):
+             print(str(i) + ". " + name + ": " + str(round(fp, 1)) + " FP")
+         
+        #build optimal lineup
+        optimal_lineup = rost.buildOptimalLineup(player_objects, matchup_data, positions)
+        rost.displayLineup(optimal_lineup)
+        
+        
 
-        data = {}
-        for player in roster:
-             opposition = opposing_team[player['full_name']]
-             data.update(player, rost.getMatchupData(player['full_name'],opposition,seasons))
+          #done???/ # DONE
+
           
-          #now i have å dictionary of players and their projected fantasy points against that specific team
-          #now i need to get their positions so they can fit the roster
-          #Remember: PG SG PF SF C C G F UTIL123 and 3 BEN
-          #lowest 3 scores should go on the benches
-          #individual players can have multiple roles(SG, PF, PG)
-          #UTIITY does not care about roles
-          #Create a dictionary of {position, player name}
+         
+          
 
           #After getting the positions, sort the players into descedning order based on fantasy points.
           #that means the best performing players should get the highest priority.
